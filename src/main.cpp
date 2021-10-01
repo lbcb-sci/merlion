@@ -7,8 +7,11 @@
 
 #include "bioparser/fasta_parser.hpp"
 #include "bioparser/fastq_parser.hpp"
-#include "biosoup/nucleic_acid.hpp"
 #include "biosoup/timer.hpp"
+#include "cereal/archives/json.hpp"
+#include "ram/minimizer_engine.hpp"
+
+#include "stack.hpp"
 
 std::atomic<std::uint32_t> biosoup::NucleicAcid::num_objects{0};
 
@@ -160,6 +163,71 @@ int main(int argc, char** argv) {
   std::cerr << "[merlion::] loaded " << sequences.size() << " sequences "
             << std::fixed << timer.Stop() << "s"
             << std::endl;
+
+  std::vector<merlion::Stack> stacks;
+  stacks.reserve(sequences.size());
+  for (const auto& it : sequences) {
+    stacks.emplace_back(*it);
+  }
+
+  auto thread_pool = std::make_shared<thread_pool::ThreadPool>(num_threads);
+  ram::MinimizerEngine minimizer_engine{thread_pool, kmer_len, window_len};
+
+  for (std::size_t i = 0, j = 0, bytes = 0; i < sequences.size(); ++i) {
+    bytes += sequences[i]->inflated_len;
+    if (i != sequences.size() - 1 && bytes < (1ULL << 32)) {
+      continue;
+    }
+    bytes = 0;
+
+    timer.Start();
+
+    minimizer_engine.Minimize(
+        sequences.begin() + j,
+        sequences.begin() + i + 1,
+        true);
+    minimizer_engine.Filter(freq);
+
+    std::cerr << "[merlion::] minimized "
+              << j << " - " << i + 1 << " / " << sequences.size() << " "
+              << std::fixed << timer.Stop() << "s"
+              << std::endl;
+
+    timer.Start();
+
+    std::vector<std::future<std::vector<biosoup::Overlap>>> futures;
+    for (std::uint32_t k = 0; k < i + 1; ++k) {
+      futures.emplace_back(thread_pool->Submit(
+          [&] (std::uint32_t i) -> std::vector<biosoup::Overlap> {
+            return minimizer_engine.Map(sequences[i], true, true, true);
+          },
+          k));
+      bytes += sequences[k]->inflated_len;
+      if (k != i && bytes < (1U << 30)) {
+        continue;
+      }
+      bytes = 0;
+
+      for (auto& it : futures) {
+        for (const auto& jt : it.get()) {
+          stacks[jt.lhs_id].AddLayer(jt);
+          stacks[jt.rhs_id].AddLayer(jt);
+        }
+      }
+      futures.clear();
+    }
+
+    std::cerr << "[merlion::] mapped sequences "
+              << std::fixed << timer.Stop() << "s"
+              << std::endl;
+
+    j = i + 1;
+  }
+
+  cereal::JSONOutputArchive archive(std::cout);
+  for (const auto& it : stacks) {
+    archive(cereal::make_nvp(std::to_string(it.id()), it));
+  }
 
   return 0;
 }
