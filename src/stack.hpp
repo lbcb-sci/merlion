@@ -32,21 +32,21 @@ class Stack {
     return id_;
   }
 
-  bool is_invalid() const {
-    return is_invalid_;
+  std::uint32_t len() const {
+    return len_;
   }
 
-  void set_is_invalid() {
-    is_invalid_ = true;
+  const std::vector<std::pair<std::uint32_t, std::uint32_t>>& layers() const {
+    return layers_;
   }
 
-  bool is_contained() const {
-    return is_contained_;
-  }
+  void AddLayer(const biosoup::Overlap& o);
 
-  void set_is_contained() {
-    is_contained_ = true;
-  }
+  void AddLayers(
+      std::vector<biosoup::Overlap>::const_iterator begin,
+      std::vector<biosoup::Overlap>::const_iterator end);
+
+  void SortLayers();
 
   bool is_chimeric() const {
     return is_chimeric_;
@@ -56,16 +56,6 @@ class Stack {
     is_chimeric_ = true;
   }
 
-  const std::vector<std::pair<std::uint32_t, std::uint32_t>>& layers() const {
-    return layers_;
-  }
-
-  void AddLayers(
-      std::vector<biosoup::Overlap>::const_iterator begin,
-      std::vector<biosoup::Overlap>::const_iterator end);
-
-  void AddLayer(const biosoup::Overlap& o);
-
  private:
   Stack() = default;
 
@@ -74,20 +64,16 @@ class Stack {
     archive(
         CEREAL_NVP(id_),
         CEREAL_NVP(len_),
-        CEREAL_NVP(is_invalid_),
-        CEREAL_NVP(is_contained_),
-        CEREAL_NVP(is_chimeric_),
-        CEREAL_NVP(layers_));
+        CEREAL_NVP(layers_),
+        CEREAL_NVP(is_chimeric_));
   }
 
   friend cereal::access;
 
   std::uint32_t id_;
   std::uint32_t len_;
-  bool is_invalid_;
-  bool is_contained_;
-  bool is_chimeric_;
   std::vector<std::pair<std::uint32_t, std::uint32_t>> layers_;
+  bool is_chimeric_;
 };
 
 }  // namespace merlion

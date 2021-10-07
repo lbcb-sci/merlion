@@ -11,6 +11,7 @@
 #include "cereal/archives/json.hpp"
 #include "ram/minimizer_engine.hpp"
 
+#include "pile.hpp"
 #include "stack.hpp"
 
 std::atomic<std::uint32_t> biosoup::NucleicAcid::num_objects{0};
@@ -71,7 +72,7 @@ void Help() {
       "\n"
       "  options:\n"
       "    -a, --annotate\n"
-      "      use heuristics to find contained and chimeric sequences\n"
+      "      use heuristics from Raven assembler to find chimeric sequences\n"
       "    -k, --kmer-len <int>\n"
       "      default: 15\n"
       "      length of minimizers used to find overlaps\n"
@@ -223,11 +224,70 @@ int main(int argc, char** argv) {
 
     j = i + 1;
   }
+  for (auto& it : stacks) {
+    it.SortLayers();
+  }
+
+  if (annotate) {
+    timer.Start();
+
+    std::vector<std::unique_ptr<merlion::Pile>> piles;
+    for (const auto& it : stacks) {
+      piles.emplace_back(std::unique_ptr<merlion::Pile>(new merlion::Pile(it)));
+    }
+
+    std::vector<std::future<void>> futures;
+    for (const auto& it : piles) {
+      futures.emplace_back(thread_pool->Submit(
+          [] (merlion::Pile* it) -> void {
+            it->FindMedian();
+          },
+          it.get()));
+    }
+    for (const auto& it : futures) {
+      it.wait();
+    }
+
+    std::vector<std::uint16_t> coverage;
+    for (const auto& it : piles) {
+      coverage.emplace_back(it->median());
+    }
+    std::nth_element(
+        coverage.begin(),
+        coverage.begin() + coverage.size() / 2,
+        coverage.end());
+    auto median_coverage = coverage[coverage.size() / 2];
+
+    futures.clear();
+    for (const auto& it : piles) {
+      futures.emplace_back(thread_pool->Submit(
+          [&] (merlion::Pile* it) -> void {
+            it->FindChimericRegions(median_coverage);
+          },
+          it.get()));
+    }
+    for (const auto& it : futures) {
+      it.wait();
+    }
+
+    for (const auto& it : piles) {
+      if (it->is_chimeric()) {
+        stacks[it->id()].set_is_chimeric();
+      }
+    }
+
+    std::cerr << "[merlion::] annotated sequences "
+              << std::fixed << timer.Stop() << "s"
+              << std::endl;
+  }
 
   cereal::JSONOutputArchive archive(std::cout);
   for (const auto& it : stacks) {
     archive(cereal::make_nvp(std::to_string(it.id()), it));
   }
+
+  std::cerr << "[merlion::] " << std::fixed << timer.elapsed_time() << "s"
+            << std::endl;
 
   return 0;
 }

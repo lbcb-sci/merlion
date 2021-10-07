@@ -1,5 +1,7 @@
 // Copyright (c) 2021 Robert Vaser
 
+#include <algorithm>
+
 #include "stack.hpp"
 
 namespace merlion {
@@ -7,10 +9,16 @@ namespace merlion {
 Stack::Stack(const biosoup::NucleicAcid& na)
     : id_(na.id),
       len_(na.inflated_len),
-      is_invalid_(false),
-      is_contained_(false),
-      is_chimeric_(false),
-      layers_() {
+      layers_(),
+      is_chimeric_(false) {
+}
+
+void Stack::AddLayer(const biosoup::Overlap& o) {
+  if (id_ == o.lhs_id) {
+    layers_.emplace_back(o.lhs_begin, o.lhs_end);
+  } else if (id_ == o.rhs_id) {
+    layers_.emplace_back(o.rhs_begin, o.rhs_end);
+  }
 }
 
 void Stack::AddLayers(
@@ -22,10 +30,8 @@ void Stack::AddLayers(
   }
 }
 
-void Stack::AddLayer(const biosoup::Overlap& o) {
-  layers_.emplace_back(
-      o.lhs_id == id_ ? o.lhs_begin : o.rhs_begin,
-      o.lhs_id == id_ ? o.lhs_end   : o.rhs_end);
+void Stack::SortLayers() {
+  std::sort(layers_.begin(), layers_.end());
 }
 
 }  // namespace merlion
